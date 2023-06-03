@@ -30,7 +30,6 @@ fn main() {
     for (image, label) in test_images.iter().zip(test_labels.iter()) {
         println!("Expected: {} Got: {}", label, net.test(image.to_vec()));
         net._print_image(image);
-        return;
     }
 }
 
@@ -54,7 +53,7 @@ fn _xor_training() {
     }
 }
 
-fn _print_dataset(images: &Vec<Vec<f64>>, labels: &Vec<u8>) {
+fn _print_dataset(images: &[Vec<f64>], labels: &[u8]) {
     for (lab, img) in labels.iter().zip(images.iter()) {
         println!("{lab}");
         for i in 0..28 {
@@ -81,7 +80,7 @@ fn get_images(path: String) -> Result<Vec<Vec<f64>>, Error> {
 
     let mut images = Vec::new();
     let mut image = Vec::new();
-    for byte in bytes[16..].to_owned() {
+    for byte in bytes[16..].iter().copied() {
         image.push(byte as f64 / 255.0);
         if image.len() == 28 * 28 {
             images.push(image.to_vec());

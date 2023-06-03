@@ -58,7 +58,7 @@ impl NeuralNetwork {
         self.hightest_index(self.forward_prop(&input).last().unwrap())
     }
     /// return the index of the greatest element in a vec
-    pub fn hightest_index(&self, result: &Vec<f64>) -> usize {
+    pub fn hightest_index(&self, result: &[f64]) -> usize {
         result
             .iter()
             .enumerate()
@@ -135,51 +135,51 @@ impl NeuralNetwork {
     /// Calculates the Gradient of the Cost Function
     pub fn back_prop(
         &self,
-        expected: &Vec<f64>,
-        activations: &Vec<Vec<f64>>,
-        dbiases: &mut Vec<Vec<f64>>,
-        dweights: &mut Vec<Vec<Vec<f64>>>,
+        expected: &[f64],
+        activations: &[Vec<f64>],
+        dbiases: &mut [Vec<f64>],
+        dweights: &mut [Vec<Vec<f64>>],
     ) {
         let lmax = self.layers.len() - 1;
-        let mut prev_layer_dbs: Vec<f64> = (0..self.layers[lmax])
-            .map(|j| 2.0 * (activations[lmax][j] - expected[j]))
-            .collect(); // dC / dA
+        let mut da_prev: Vec<f64> = activations[lmax]
+            .iter()
+            .enumerate()
+            .map(|(j, res)| 2.0 * (res - expected[j]))
+            .collect(); // dC / dA for the output layer
 
+        // iterate backwards over the layers
         for l in (0..lmax).rev() {
-            let k_len = self.layers[l];
-            let j_len = self.layers[l + 1];
-            // Calculate the impact of each neuron and weights from this neuron backwards from the last layer
-
-            let mut current_layer_dbs: Vec<f64> = vec![0.0; k_len];
-            for j in 0..j_len {
+            // Calculate the impact of the activation (dA) of each current layer neuron on the cost depending on
+            // the weights connecting it to neurons of the next (previously calculated) layer
+            let mut da_current: Vec<f64> = vec![0.0; self.layers[l]];
+            for (j, prev_da_j) in da_prev.iter().enumerate() {
                 // update the bias of neuron j on layer l+1 (index l bcs biases start on layer 1)
-                // with the calculated dC/dB == dC/dA
-                dbiases[l][j] += prev_layer_dbs[j];
+                // with the calculated dC/dB == 1 * dC/dA
+                dbiases[l][j] += prev_da_j;
 
                 // this part of the derivative chain rule is shared between all weights and biases
                 // connected to the neuron j on layer l+1
                 let dbias_j: f64 =
-                    self.deriv_fn(self.calc_z(&activations[l], l + 1, j)) * prev_layer_dbs[j];
-                for k in 0..k_len {
+                    self.deriv_fn(self.calc_z(&activations[l], l + 1, j)) * prev_da_j;
+                for (k, da_j) in da_current.iter_mut().enumerate() {
                     // calculate the impact of the weight connected between
                     // Neuron k on layer l and Neuron j on layer l+1 on the Cost
                     dweights[l][j][k] += activations[l][k] * dbias_j;
-                    if l > 0 {
-                        // calculate the impact of neuron k on layer l
-                        // to the activation of neuron j on layer l+1
-                        current_layer_dbs[k] += self.weights[l][j][k] * dbias_j;
-                    }
+
+                    // calculate the impact of neuron k on layer l
+                    // to the activation of neuron j on layer l+1
+                    *da_j += self.weights[l][j][k] * dbias_j;
                 }
             }
-            prev_layer_dbs = current_layer_dbs;
+            da_prev = da_current;
         }
     }
 
     /// Applies the gradient to the model to improve the cost function, using alpha as the learning rate
     pub fn gradient_descent(
         &mut self,
-        db: &mut Vec<Vec<f64>>,
-        dw: &mut Vec<Vec<Vec<f64>>>,
+        db: &mut [Vec<f64>],
+        dw: &mut [Vec<Vec<f64>>],
         batch_size: usize,
         alpha: f64,
     ) -> f64 {
@@ -235,10 +235,13 @@ impl NeuralNetwork {
             ActivationFn::TanH => 1.0 / val.cosh().powi(2),
         };
 
-        return if result.is_finite() { result } else { 0.0 };
+        if !result.is_finite() {
+            return 0.0;
+        }
+        result
     }
 
-    pub fn cost(&self, expected: &Vec<f64>, result: &Vec<f64>) -> f64 {
+    pub fn cost(&self, expected: &[f64], result: &[f64]) -> f64 {
         result
             .iter()
             .zip(expected.iter())
@@ -253,7 +256,7 @@ impl NeuralNetwork {
         todo!("not implemented");
     }
 
-    pub fn _print_image(&self, image: &Vec<f64>) {
+    pub fn _print_image(&self, image: &[f64]) {
         for i in 0..28 {
             for j in 0..28 {
                 print!("{}", if image[i * 28 + j] > 0.0 { "*" } else { " " });
