@@ -153,10 +153,6 @@ impl NeuralNetwork {
             // the weights connecting it to neurons of the next (previously calculated) layer
             let mut da_current: Vec<f64> = vec![0.0; self.layers[l]];
             for (j, prev_da_j) in da_prev.iter().enumerate() {
-                // update the bias of neuron j on layer l+1 (index l bcs biases start on layer 1)
-                // with the calculated dC/dB == 1 * dC/dA
-                dbiases[l][j] += prev_da_j;
-
                 // this part of the derivative chain rule is shared between all weights and biases
                 // connected to the neuron j on layer l+1
                 let dbias_j: f64 =
@@ -165,13 +161,19 @@ impl NeuralNetwork {
                     // calculate the impact of the weight connected between
                     // Neuron k on layer l and Neuron j on layer l+1 on the Cost
                     dweights[l][j][k] += activations[l][k] * dbias_j;
-
-                    // calculate the impact of neuron k on layer l
-                    // to the activation of neuron j on layer l+1
-                    *da_j += self.weights[l][j][k] * dbias_j;
+                    if l > 0 {
+                        // calculate the impact of neuron k on layer l
+                        // to the activation of neuron j on layer l+1
+                        *da_j += self.weights[l][j][k] * dbias_j;
+                    }
                 }
+                // calculate the impact of the bias of neuron j on layer l+1
+                // (index l bcs biases start on layer 1)
+                dbiases[l][j] += dbias_j;
             }
-            da_prev = da_current;
+            if l > 0 {
+                da_prev = da_current;
+            }
         }
     }
 
@@ -345,11 +347,11 @@ pub fn test_back_prop() {
 
     let expected_dbiases = vec![
         vec![
-            -0.05139271218076821,
-            -0.0022085604837288747,
-            -0.046975591213310464,
+            -0.006712183562988572,
+            -0.0004538598581902617,
+            -0.011483573718680513,
         ],
-        vec![1.0446617363212443, -1.0133100216938837],
+        vec![0.26064449504338916, -0.2532826267642929],
     ];
     let expected_dweights = vec![
         vec![

@@ -23,14 +23,22 @@ fn main() {
         })
         .collect();
 
-    net.train(images, expected, 100, 5.0);
+    net.train(images, expected, 10, 2.5);
 
     let test_images = get_images("data/t10k-images-idx3-ubyte".to_string()).unwrap();
     let test_labels = get_labels("data/t10k-labels-idx1-ubyte".to_string()).unwrap();
+    let mut accurates = 0;
     for (image, label) in test_images.iter().zip(test_labels.iter()) {
-        println!("Expected: {} Got: {}", label, net.test(image.to_vec()));
-        net._print_image(image);
+        if *label as usize == net.test(image.to_vec()) {
+            accurates += 1;
+        }
+        // println!("Expected: {} Got: {}", label, net.test(image.to_vec()));
+        // net._print_image(image);
     }
+    println!(
+        "Test Accuracy: {}%",
+        accurates as f64 * 100.0 / test_images.len() as f64
+    )
 }
 
 fn _xor_training() {
@@ -44,10 +52,26 @@ fn _xor_training() {
     ];
     let mut ctr = 0;
     loop {
-        testnet.train(images.to_vec(), labels.to_vec(), 100, 0.02);
+        testnet.train(images.to_vec(), labels.to_vec(), 4, 0.005);
+
         ctr += 1;
         if ctr == 1000000 {
-            dbg!(testnet.weights, testnet.biases);
+            println!(
+                "xor(1,1) {}",
+                testnet.forward_prop(&vec![1.0, 1.0]).last().unwrap()[0]
+            );
+            println!(
+                "xor(0,1) {}",
+                testnet.forward_prop(&vec![0.0, 1.0]).last().unwrap()[0]
+            );
+            println!(
+                "xor(1,0) {}",
+                testnet.forward_prop(&vec![1.0, 0.0]).last().unwrap()[0]
+            );
+            println!(
+                "xor(0,0) {}",
+                testnet.forward_prop(&vec![0.0, 0.0]).last().unwrap()[0]
+            );
             panic!();
         }
     }
