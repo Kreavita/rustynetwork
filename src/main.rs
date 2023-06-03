@@ -1,7 +1,7 @@
+use core::panic;
 use std::{
     fs::File,
     io::{Error, Read},
-    process::exit,
 };
 
 use neural_network::{
@@ -26,7 +26,7 @@ fn main() {
         })
         .collect();
 
-    net.train(images, expected, 100, 2.0);
+    net.train(images, expected, 100, 5.0);
 
     let test_images = get_images("data/t10k-images-idx3-ubyte".to_string()).unwrap();
     let test_labels = get_labels("data/t10k-labels-idx1-ubyte".to_string()).unwrap();
@@ -46,8 +46,14 @@ fn _xor_training() {
         vec![0.0, 1.0],
         vec![1.0, 1.0],
     ];
+    let mut ctr = 0;
     loop {
         testnet.train(images.to_vec(), labels.to_vec(), 100, 0.02);
+        ctr += 1;
+        if ctr == 1000000 {
+            dbg!(testnet.weights, testnet.biases);
+            panic!();
+        }
     }
 }
 

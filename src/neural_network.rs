@@ -1,12 +1,14 @@
-use core::panic;
 use rand::thread_rng;
 use rand_distr::{Distribution, Normal};
-use std::{usize, vec};
+use std::{
+    f64::{MAX, MIN},
+    usize, vec,
+};
 
 pub struct NeuralNetwork {
     layers: Vec<usize>,
-    weights: Vec<Vec<Vec<f64>>>,
-    biases: Vec<Vec<f64>>,
+    pub weights: Vec<Vec<Vec<f64>>>,
+    pub biases: Vec<Vec<f64>>,
     activation_fn: ActivationFn,
 }
 #[derive(PartialEq)]
@@ -19,13 +21,8 @@ pub enum ActivationFn {
 impl NeuralNetwork {
     pub fn new(layers: Vec<usize>, activation_fn: ActivationFn) -> Self {
         let mut rng = thread_rng();
-        let dist = Normal::new(0.0, 1.0 / layers[0] as f64).unwrap();
 
-        let biases: Vec<Vec<f64>> = layers
-            .iter()
-            .skip(1)
-            .map(|i| dist.sample_iter(&mut rng).take(*i).collect())
-            .collect();
+        let dist = Normal::new(0.0, 1.0 / layers[0] as f64).unwrap();
         let weights: Vec<Vec<Vec<f64>>> = layers
             .iter()
             .zip(layers.iter().skip(1))
@@ -34,6 +31,13 @@ impl NeuralNetwork {
                     .map(|_| dist.sample_iter(&mut rng).take(*k).collect())
                     .collect()
             })
+            .collect();
+
+        let dist2 = Normal::new(0.0, 3.0 / layers[0] as f64).unwrap();
+        let biases: Vec<Vec<f64>> = layers
+            .iter()
+            .skip(1)
+            .map(|i| dist2.sample_iter(&mut rng).take(*i).collect())
             .collect();
 
         Self {
@@ -75,52 +79,52 @@ impl NeuralNetwork {
         let mut acc_counter = 0;
         let mut cost_counter: f64 = 0.0;
 
-        for (input, expected) in inputs.iter().zip(expected_outputs.iter()) {
-            let activations: Vec<Vec<f64>> = self.forward_prop(input);
-            self.backpropagate(&expected, &activations, &mut dbiases, &mut dweights);
+        for (input, expected) in inputs.into_iter().zip(expected_outputs.into_iter()) {
+            let activations: Vec<Vec<f64>> = self.forward_prop(&input);
+
+            self.back_prop(&expected, &activations, &mut dbiases, &mut dweights);
             let res = self.hightest_index(activations.last().unwrap());
 
             batch_counter += 1;
             cost_counter += self.cost(&expected, &activations.last().unwrap());
-            if res == self.hightest_index(expected) {
+            if res == self.hightest_index(&expected) {
                 acc_counter += 1;
             }
-            if batch_counter == batch_size {
-                //self._print_image(dataset);
+            if batch_counter % batch_size == 0 {
                 println!(
-                    "acc: {} cost: {}",
-                    acc_counter as f64 / batch_counter as f64,
-                    cost_counter / batch_counter as f64
+                    "Epoch: {} acc: {} cost: {} change: {}",
+                    batch_counter / batch_size,
+                    acc_counter as f64 / batch_size as f64,
+                    (cost_counter * 100.0 / batch_size as f64).round() / 100.0,
+                    self.gradient_descent(&mut dbiases, &mut dweights, batch_size, alpha)
                 );
-                self.gradient_descent(&mut dbiases, &mut dweights, batch_size, alpha);
-                batch_counter = 0;
                 acc_counter = 0;
                 cost_counter = 0.0;
             }
         }
 
-        if batch_counter > 0 {
-            self.gradient_descent(&mut dbiases, &mut dweights, batch_size, alpha);
+        if batch_counter % batch_size > 0 {
+            self.gradient_descent(&mut dbiases, &mut dweights, batch_counter, alpha);
         }
     }
 
     /// Propagates a input through the network
     pub fn forward_prop(&self, input: &Vec<f64>) -> Vec<Vec<f64>> {
-        if input.len() != self.layers[0] {
-            panic!("invalid input data");
-        }
-        let mut activations: Vec<Vec<f64>> = vec![input.clone()];
+        assert!(input.len() == self.layers[0]); // prevent invalid input data
+
+        let mut activations: Vec<Vec<f64>> = vec![input.to_vec()];
         for l in 1..self.layers.len() {
             activations.push(
                 (0..self.layers[l])
-                    .map(|j| self.activ_fn(self.calc_neuron(&activations[l - 1], l, j)))
+                    .map(|j| self.activ_fn(self.calc_z(&activations[l - 1], l, j)))
                     .collect(),
             );
         }
         activations
     }
 
-    pub fn backpropagate(
+    /// Calculates the Gradient of the Cost Function
+    pub fn back_prop(
         &self,
         expected: &Vec<f64>,
         activations: &Vec<Vec<f64>>,
@@ -128,81 +132,76 @@ impl NeuralNetwork {
         dweights: &mut Vec<Vec<Vec<f64>>>,
     ) {
         let lmax = self.layers.len() - 1;
-        let mut last_db: Vec<f64> = (0..self.layers[lmax])
-            .map(|k| {
-                let value = 2.0 * (activations[lmax][k] - expected[k]);
-                dbiases[lmax - 1][k] += value;
-                return value;
-            })
-            .collect();
+        let mut prev_layer_dbs: Vec<f64> = (0..self.layers[lmax])
+            .map(|j| 2.0 * (activations[lmax][j] - expected[j]))
+            .collect(); // dC / dA
 
         for l in (0..lmax).rev() {
             let k_len = self.layers[l];
             let j_len = self.layers[l + 1];
-
             // Calculate the impact of each neuron and weights from this neuron backwards from the last layer
-            // this part of the derivative chain rule is shared between weights and biases
-            let d_consts: Vec<f64> = (0..j_len)
-                .map(|j| {
-                    self.deriv_fn(self.calc_neuron(&activations[l], l + 1, j)) * &last_db[j].clone()
-                })
-                .collect();
 
-            let mut new_db = vec![0.0; k_len];
-            for k in 0..k_len {
-                for j in 0..j_len {
+            let mut current_layer_dbs: Vec<f64> = vec![0.0; k_len];
+            for j in 0..j_len {
+                // update the bias of neuron j on layer l+1 (index l bcs biases start on layer 1)
+                // with the calculated dC/dB == dC/dA
+                dbiases[l][j] -= prev_layer_dbs[j];
+
+                // this part of the derivative chain rule is shared between all weights and biases
+                // connected to the neuron j on layer l+1
+                let dbias_j: f64 =
+                    self.deriv_fn(self.calc_z(&activations[l], l + 1, j)) * prev_layer_dbs[j];
+                for k in 0..k_len {
                     // calculate the impact of the weight connected between
                     // Neuron k on layer l and Neuron j on layer l+1 on the Cost
-                    dweights[l][j][k] += activations[l][k] * d_consts[j];
-                }
-                if l > 0 {
-                    // calculate the impact of the activation of
-                    // Neuron k on layer l
-                    new_db[k] = (0..j_len)
-                        .map(|j| self.weights[l][j][k] * d_consts[j])
-                        .sum::<f64>();
-                    dbiases[l - 1][k] += d_consts[j];
+                    dweights[l][j][k] -= activations[l][k] * dbias_j;
+                    if l > 0 {
+                        // calculate the impact of neuron k on layer l
+                        // to the activation of neuron j on layer l+1
+                        current_layer_dbs[k] += self.weights[l][j][k] * dbias_j;
+                    }
                 }
             }
-            last_db = new_db;
+            prev_layer_dbs = current_layer_dbs;
         }
     }
 
-    /// Applies a Gradient to the model, using alpha as the learning rate
+    /// Applies the gradient to the model to improve the cost function, using alpha as the learning rate
     pub fn gradient_descent(
         &mut self,
         db: &mut Vec<Vec<f64>>,
         dw: &mut Vec<Vec<Vec<f64>>>,
         batch_size: usize,
         alpha: f64,
-    ) {
+    ) -> f64 {
+        let mut total_change = 0.0;
+        let mut count = 0.0;
         // apply the gradient to the model
         for l in 0..self.layers.len() - 1 {
             for j in 0..self.layers[l + 1] {
-                self.biases[l][j] -= alpha * db[l][j] / batch_size as f64;
+                self.biases[l][j] += alpha * db[l][j] / batch_size as f64;
+                total_change += (alpha * db[l][j] / batch_size as f64).abs();
+                count += 1.0;
                 db[l][j] = 0.0;
                 for k in 0..self.layers[l] {
-                    self.weights[l][j][k] -= alpha * dw[l][j][k] / batch_size as f64;
+                    self.weights[l][j][k] += alpha * dw[l][j][k] / batch_size as f64;
+                    total_change += (alpha * dw[l][j][k] / batch_size as f64).abs();
+                    count += 1.0;
                     dw[l][j][k] = 0.0;
                 }
             }
         }
+        total_change / count
     }
 
     /// calculate the neuron j on layer l using an input vector
-    pub fn calc_neuron(&self, input: &Vec<f64>, l: usize, j: usize) -> f64 {
-        if l < 1 {
-            panic!("Cannot Calculate Layer_0 / Input Neurons!")
-        }
+    pub fn calc_z(&self, input: &Vec<f64>, l: usize, j: usize) -> f64 {
         let k_max = self.layers[l - 1];
-        if input.len() != k_max {
-            panic!(
-                "Size Mismatch! input: {}, should be: {}",
-                input.len(),
-                k_max
-            )
-        }
-        // weights between previous neurons and the current neuron plus bias
+
+        assert!(l > 0 && l < self.layers.len()); // Invalid Layer! Cannot Calculate Layer_0 / Input Neurons!
+        assert!(k_max == input.len());
+
+        // sum up all incoming signals to the neuron j on layer l plus the bias
         (0..k_max)
             .map(|k| self.weights[l - 1][j][k] * input[k])
             .sum::<f64>()
@@ -213,37 +212,30 @@ impl NeuralNetwork {
         let result: f64 = match self.activation_fn {
             ActivationFn::ReLU => val.max(0.0),
             ActivationFn::Linear => val,
-            ActivationFn::Sigmoid => 1.0 / (1.0 + f64::exp(-val)) - 0.5,
+            ActivationFn::Sigmoid => 1.0 / (1.0 + (-val).exp()),
             ActivationFn::TanH => f64::tanh(val),
         };
-        if !result.is_finite() {
-            panic!("Encountered not finite result trying sig({}) ", val);
-        }
+        assert!(result.is_finite(), "sig({}) produced a infinite value", val);
         result
     }
 
     pub fn deriv_fn(&self, val: f64) -> f64 {
         let result: f64 = match self.activation_fn {
-            ActivationFn::ReLU => val.signum().max(0.0),
+            ActivationFn::ReLU => return if val > 0.0 { 1.0 } else { 0.0 },
             ActivationFn::Linear => 1.0,
-            ActivationFn::Sigmoid => {
-                let sig: f64 = 1.0 / (1.0 + (-val).exp());
-                sig * (1.0 - sig)
-            }
-            ActivationFn::TanH => 1.0 / f64::cosh(val).powi(2),
+            //ActivationFn::Sigmoid => self.activ_fn(val) * (1.0 - self.activ_fn(val)),
+            ActivationFn::Sigmoid => (-val).exp() / (1.0 + (-val).exp()).powi(2),
+            ActivationFn::TanH => 1.0 / val.cosh().powi(2),
         };
-        if !result.is_finite() {
-            return 0.0;
-            //panic!("Encountered not finite result trying d_sig({}) ", val);
-        }
-        result
+
+        return if result.is_finite() { result } else { 0.0 };
     }
 
     pub fn cost(&self, expected: &Vec<f64>, result: &Vec<f64>) -> f64 {
         result
-            .into_iter()
-            .zip(expected.into_iter())
-            .fold(0f64, |a, (r, e)| a + (r - e).powi(2))
+            .iter()
+            .zip(expected.iter())
+            .fold(0.0, |a, (r, e)| a + (r - e).powi(2))
     }
 
     pub fn _dumps(&self) -> String {
@@ -277,31 +269,31 @@ pub fn setup_tests() -> NeuralNetwork {
 }
 
 #[test]
-pub fn test_calc_neuron() {
+pub fn test_calc_z() {
     let net = setup_tests();
     let input = vec![3.0, 5.0];
     // weights[0][0] x input + biases[0][0]
-    assert_eq!((net.calc_neuron(&input, 1, 0) * 10.0).round() / 10.0, 1.7);
+    assert_eq!((net.calc_z(&input, 1, 0) * 10.0).round() / 10.0, 1.7);
     // weights[0][1] x input + biases[0][1]
-    assert_eq!((net.calc_neuron(&input, 1, 1) * 10.0).round() / 10.0, 0.9);
+    assert_eq!((net.calc_z(&input, 1, 1) * 10.0).round() / 10.0, 0.9);
     // weights[0][2] x input + biases[0][2]
-    assert_eq!((net.calc_neuron(&input, 1, 2) * 10.0).round() / 10.0, 0.3);
+    assert_eq!((net.calc_z(&input, 1, 2) * 10.0).round() / 10.0, 0.3);
 
     let input = vec![3.0, 5.0, 7.0];
     // weights[1][0] x input + biases[1][0]
     assert_eq!(
-        net.calc_neuron(&input, 2, 0),
+        net.calc_z(&input, 2, 0),
         0.1 + 3.0 * -0.1 + 5.0 * -0.3 + 7.0 * 0.5
     );
     // weights[1][1] x input + biases[1][1]
     assert_eq!(
-        net.calc_neuron(&input, 2, 1),
+        net.calc_z(&input, 2, 1),
         -0.3 + 3.0 * 0.1 + 5.0 * -0.3 + 7.0 * 0.7
     );
 }
 
 #[test]
-pub fn test_evaluate() {
+pub fn test_forward_prop() {
     let net = setup_tests();
     let input = vec![3.0, 5.0];
     let input2 = vec![
@@ -314,15 +306,15 @@ pub fn test_evaluate() {
         input.to_vec(),
         input2.to_vec(),
         vec![
-            net.activ_fn(net.calc_neuron(&input2, 2, 0)),
-            net.activ_fn(net.calc_neuron(&input2, 2, 1)),
+            net.activ_fn(net.calc_z(&input2, 2, 0)),
+            net.activ_fn(net.calc_z(&input2, 2, 1)),
         ],
     ];
     assert_eq!(net.forward_prop(&input), expected);
 }
 
 #[test]
-pub fn test_backprop() {
+pub fn test_back_prop() {
     let net = setup_tests();
     let activations = vec![
         vec![3.0, 5.0],
@@ -339,10 +331,34 @@ pub fn test_backprop() {
     ];
     // biases[l][j]: bias of neuron j on layer l-1
     let mut dbiases = vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0]];
-    net.backpropagate(&vec![0.0, 1.0], &activations, &mut dbiases, &mut dweights);
+    net.back_prop(&vec![0.0, 1.0], &activations, &mut dbiases, &mut dweights);
 
-    dbg!(dweights);
-    dbg!(dbiases);
+    let expected_dbiases = vec![
+        vec![
+            -0.05139271218076821,
+            -0.0022085604837288747,
+            -0.046975591213310464,
+        ],
+        vec![1.0446617363212443, -1.0133100216938837],
+    ];
+    let expected_dweights = vec![
+        vec![
+            vec![-0.020136550688965714, -0.03356091781494286],
+            vec![-0.0013615795745707852, -0.002269299290951309],
+            vec![-0.03445072115604154, -0.05741786859340257],
+        ],
+        vec![
+            vec![0.220383974023948, 0.1853050741130428, 0.14972527972582844],
+            vec![
+                -0.21415925868009242,
+                -0.18007115752162856,
+                -0.1454963095831485,
+            ],
+        ],
+    ];
+
+    assert_eq!(dbiases, expected_dbiases);
+    assert_eq!(dweights, expected_dweights);
 }
 
 #[test]
@@ -380,4 +396,17 @@ pub fn test_gradient_descent() {
     );
     assert_eq!(dweights, vec![vec![vec![0.0; 2]; 3], vec![vec![0.0; 3]; 2]]);
     assert_eq!(dbiases, vec![vec![0.0; 3], vec![0.0; 2]]);
+}
+
+#[test]
+pub fn test_fns() {
+    let net = setup_tests();
+    assert_eq!(net.activ_fn(0.0), 0.5);
+    assert_eq!(net.activ_fn(MAX), 1.0);
+    assert_eq!(net.activ_fn(MIN), 0.0);
+
+    assert_eq!(net.deriv_fn(0.0), 0.25);
+    assert_eq!(net.deriv_fn(MAX), 0.0);
+    assert_eq!(net.deriv_fn(MIN), 0.0);
+    assert_eq!(net.deriv_fn(3.0), 0.045176659730912144);
 }
