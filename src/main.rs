@@ -4,10 +4,7 @@ use std::{
     io::{Error, Read},
 };
 
-use neural_network::{
-    ActivationFn::{ReLU, Sigmoid, TanH},
-    NeuralNetwork,
-};
+use neural_network::{ActivationFn::Sigmoid, NeuralNetwork};
 
 mod neural_network;
 

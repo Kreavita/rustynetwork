@@ -1,17 +1,16 @@
 use rand::thread_rng;
 use rand_distr::{Distribution, Normal};
-use std::{
-    f64::{MAX, MIN},
-    usize, vec,
-};
+use std::{usize, vec};
 
 pub struct NeuralNetwork {
     layers: Vec<usize>,
     pub weights: Vec<Vec<Vec<f64>>>,
     pub biases: Vec<Vec<f64>>,
+    param_count: usize,
     activation_fn: ActivationFn,
 }
 #[derive(PartialEq)]
+#[allow(dead_code)]
 pub enum ActivationFn {
     ReLU,
     Linear,
@@ -40,10 +39,18 @@ impl NeuralNetwork {
             .map(|i| dist2.sample_iter(&mut rng).take(*i).collect())
             .collect();
 
+        let param_count = layers
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(i, val)| (layers[i - 1] + 1) * val)
+            .sum();
+
         Self {
             layers,
             weights,
             biases,
+            param_count,
             activation_fn,
         }
     }
@@ -81,15 +88,16 @@ impl NeuralNetwork {
 
         for (input, expected) in inputs.into_iter().zip(expected_outputs.into_iter()) {
             let activations: Vec<Vec<f64>> = self.forward_prop(&input);
+            let result = activations.last().unwrap();
 
-            self.back_prop(&expected, &activations, &mut dbiases, &mut dweights);
-            let res = self.hightest_index(activations.last().unwrap());
-
+            cost_counter += self.cost(&expected, result);
             batch_counter += 1;
-            cost_counter += self.cost(&expected, &activations.last().unwrap());
-            if res == self.hightest_index(&expected) {
+            if self.hightest_index(result) == self.hightest_index(&expected) {
                 acc_counter += 1;
             }
+
+            self.back_prop(&expected, &activations, &mut dbiases, &mut dweights);
+
             if batch_counter % batch_size == 0 {
                 println!(
                     "Epoch: {} acc: {} cost: {} change: {}",
@@ -97,6 +105,7 @@ impl NeuralNetwork {
                     acc_counter as f64 / batch_size as f64,
                     (cost_counter * 100.0 / batch_size as f64).round() / 100.0,
                     self.gradient_descent(&mut dbiases, &mut dweights, batch_size, alpha)
+                        / self.param_count as f64
                 );
                 acc_counter = 0;
                 cost_counter = 0.0;
@@ -145,7 +154,7 @@ impl NeuralNetwork {
             for j in 0..j_len {
                 // update the bias of neuron j on layer l+1 (index l bcs biases start on layer 1)
                 // with the calculated dC/dB == dC/dA
-                dbiases[l][j] -= prev_layer_dbs[j];
+                dbiases[l][j] += prev_layer_dbs[j];
 
                 // this part of the derivative chain rule is shared between all weights and biases
                 // connected to the neuron j on layer l+1
@@ -154,7 +163,7 @@ impl NeuralNetwork {
                 for k in 0..k_len {
                     // calculate the impact of the weight connected between
                     // Neuron k on layer l and Neuron j on layer l+1 on the Cost
-                    dweights[l][j][k] -= activations[l][k] * dbias_j;
+                    dweights[l][j][k] += activations[l][k] * dbias_j;
                     if l > 0 {
                         // calculate the impact of neuron k on layer l
                         // to the activation of neuron j on layer l+1
@@ -175,23 +184,21 @@ impl NeuralNetwork {
         alpha: f64,
     ) -> f64 {
         let mut total_change = 0.0;
-        let mut count = 0.0;
         // apply the gradient to the model
         for l in 0..self.layers.len() - 1 {
             for j in 0..self.layers[l + 1] {
-                self.biases[l][j] += alpha * db[l][j] / batch_size as f64;
+                self.biases[l][j] -= alpha * db[l][j] / batch_size as f64;
                 total_change += (alpha * db[l][j] / batch_size as f64).abs();
-                count += 1.0;
                 db[l][j] = 0.0;
+
                 for k in 0..self.layers[l] {
-                    self.weights[l][j][k] += alpha * dw[l][j][k] / batch_size as f64;
+                    self.weights[l][j][k] -= alpha * dw[l][j][k] / batch_size as f64;
                     total_change += (alpha * dw[l][j][k] / batch_size as f64).abs();
-                    count += 1.0;
                     dw[l][j][k] = 0.0;
                 }
             }
         }
-        total_change / count
+        total_change
     }
 
     /// calculate the neuron j on layer l using an input vector
@@ -239,11 +246,11 @@ impl NeuralNetwork {
     }
 
     pub fn _dumps(&self) -> String {
-        todo!("muss gemacht werden");
+        todo!("not implemented");
     }
 
     pub fn _load() -> String {
-        todo!("muss gemacht werden");
+        todo!("not implemented");
     }
 
     pub fn _print_image(&self, image: &Vec<f64>) {
@@ -256,7 +263,7 @@ impl NeuralNetwork {
     }
 }
 
-pub fn setup_tests() -> NeuralNetwork {
+pub fn _setup_tests() -> NeuralNetwork {
     let mut net = NeuralNetwork::new(vec![2, 3, 2], ActivationFn::Sigmoid);
     // weights[l][j][k]: connects neuron k on layer l with neuron j on layer l+1
     net.weights = vec![
@@ -270,7 +277,7 @@ pub fn setup_tests() -> NeuralNetwork {
 
 #[test]
 pub fn test_calc_z() {
-    let net = setup_tests();
+    let net = _setup_tests();
     let input = vec![3.0, 5.0];
     // weights[0][0] x input + biases[0][0]
     assert_eq!((net.calc_z(&input, 1, 0) * 10.0).round() / 10.0, 1.7);
@@ -294,7 +301,7 @@ pub fn test_calc_z() {
 
 #[test]
 pub fn test_forward_prop() {
-    let net = setup_tests();
+    let net = _setup_tests();
     let input = vec![3.0, 5.0];
     let input2 = vec![
         net.activ_fn(1.7),
@@ -315,7 +322,7 @@ pub fn test_forward_prop() {
 
 #[test]
 pub fn test_back_prop() {
-    let net = setup_tests();
+    let net = _setup_tests();
     let activations = vec![
         vec![3.0, 5.0],
         vec![net.activ_fn(1.7), net.activ_fn(0.9), net.activ_fn(0.3)],
@@ -363,7 +370,7 @@ pub fn test_back_prop() {
 
 #[test]
 pub fn test_gradient_descent() {
-    let mut net = setup_tests();
+    let mut net = _setup_tests();
     // weights[l][j][k]: connects neuron k on layer l with neuron j on layer l+1
     let mut dweights = vec![
         vec![vec![0.1, 0.3], vec![-0.1, 0.3], vec![-0.4, 0.2]],
@@ -400,13 +407,13 @@ pub fn test_gradient_descent() {
 
 #[test]
 pub fn test_fns() {
-    let net = setup_tests();
+    let net = _setup_tests();
     assert_eq!(net.activ_fn(0.0), 0.5);
-    assert_eq!(net.activ_fn(MAX), 1.0);
-    assert_eq!(net.activ_fn(MIN), 0.0);
+    assert_eq!(net.activ_fn(f64::MAX), 1.0);
+    assert_eq!(net.activ_fn(f64::MIN), 0.0);
 
     assert_eq!(net.deriv_fn(0.0), 0.25);
-    assert_eq!(net.deriv_fn(MAX), 0.0);
-    assert_eq!(net.deriv_fn(MIN), 0.0);
+    assert_eq!(net.deriv_fn(f64::MAX), 0.0);
+    assert_eq!(net.deriv_fn(f64::MIN), 0.0);
     assert_eq!(net.deriv_fn(3.0), 0.045176659730912144);
 }
