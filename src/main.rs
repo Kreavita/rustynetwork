@@ -1,4 +1,10 @@
-use core::panic;
+use axum::{extract::State, routing::post, Json, Router};
+use serde::Deserialize;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tower_http::services::ServeDir;
+
 use std::{
     fs::File,
     io::{Error, Read},
@@ -8,9 +14,56 @@ use neural_network::{ActivationFn::Sigmoid, NeuralNetwork};
 
 mod neural_network;
 
-fn main() {
-    let mut net: NeuralNetwork = NeuralNetwork::new(vec![784, 16, 16, 10], Sigmoid);
+struct ServerState {
+    net: NeuralNetwork,
+}
 
+type SharedState = Arc<Mutex<ServerState>>;
+
+#[tokio::main]
+async fn main() {
+    let state = Arc::new(Mutex::new(ServerState {
+        net: NeuralNetwork::new(vec![784, 32, 32, 10], Sigmoid),
+    }));
+
+    let host = "127.0.0.1";
+    let port = "80";
+    let addr: SocketAddr = format!("{}:{}", host, port).parse().unwrap();
+
+    let app: Router = Router::new()
+        .route("/network/test", post(recognize_user_image))
+        .route("/network/train", post(train))
+        .with_state(state)
+        .nest_service("/", ServeDir::new("html"));
+
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
+
+async fn recognize_user_image(
+    State(state): State<SharedState>,
+    Json(payload): Json<Vec<f64>>,
+) -> Json<Vec<f64>> {
+    let state = state.lock().await;
+    Json::from(state.net.forward_prop(&payload).last().unwrap().to_owned())
+}
+#[derive(Deserialize)]
+struct TrainParams {
+    batchsize: usize,
+    alpha: f64,
+}
+
+async fn train(State(state): State<SharedState>, Json(payload): Json<TrainParams>) -> Json<f64> {
+    let mut state = state.lock().await;
+    train_mnist(&mut state.net, payload.batchsize, payload.alpha);
+    let acc = test_mnist(&mut state.net);
+    println!("Test Accuracy: {}%", acc);
+    Json::from(acc)
+}
+
+fn train_mnist(net: &mut NeuralNetwork, batch_size: usize, alpha: f64) {
     let labels = get_labels("data/train-labels-idx1-ubyte".to_string()).unwrap();
     let images = get_images("data/train-images-idx3-ubyte".to_string()).unwrap();
 
@@ -23,10 +76,13 @@ fn main() {
         })
         .collect();
 
-    net.train(images, expected, 10, 2.5);
+    net.train(images, expected, batch_size, alpha);
+}
 
+fn test_mnist(net: &mut NeuralNetwork) -> f64 {
     let test_images = get_images("data/t10k-images-idx3-ubyte".to_string()).unwrap();
     let test_labels = get_labels("data/t10k-labels-idx1-ubyte".to_string()).unwrap();
+
     let mut accurates = 0;
     for (image, label) in test_images.iter().zip(test_labels.iter()) {
         if *label as usize == net.test(image.to_vec()) {
@@ -35,13 +91,11 @@ fn main() {
         // println!("Expected: {} Got: {}", label, net.test(image.to_vec()));
         // net._print_image(image);
     }
-    println!(
-        "Test Accuracy: {}%",
-        accurates as f64 * 100.0 / test_images.len() as f64
-    )
+    accurates as f64 * 100.0 / test_images.len() as f64
 }
 
-fn _xor_training() {
+#[allow(dead_code)]
+fn train_xor() {
     let mut testnet = NeuralNetwork::new(vec![2, 2, 1], Sigmoid);
     let labels: Vec<Vec<f64>> = vec![vec![1.0], vec![0.0], vec![1.0], vec![0.0]];
     let images: Vec<Vec<f64>> = vec![
@@ -72,7 +126,7 @@ fn _xor_training() {
                 "xor(0,0) {}",
                 testnet.forward_prop(&vec![0.0, 0.0]).last().unwrap()[0]
             );
-            panic!();
+            return;
         }
     }
 }

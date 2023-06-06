@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>RustyNetwork</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <link rel='stylesheet' type='text/css' media='screen' href='main.css'>
+    <script src='main.js'></script>
+</head>
+
+<body>
+    <h1>RustyNetwork</h1>
+    <h5>A SIMPLE NEURAL NETWORK WRITTEN IN RUST THAT RECOGNIZES HANDWRITTEN DIGITS</h5>
+    <div>
+        <div id="training-div">
+            Enter a Batch Size and Learning rate (alpha) and press the train button to start training <br>Clear your drawings with the Clear Canvas Button.
+        </div>
+        <div class="flexbox">
+            <input type="text" placeholder="BATCHSIZE" value="10" id="batch-size">
+            <input type="text" placeholder="ALPHA" value="2.5" id="alpha">
+            <input type="button" value="TRAIN" id="train-btn">
+            <input type="button" value="CLEAR CANVAS" id="reset-canvas">
+        </div>
+    </div>
+    <div class="flexbox">
+        <canvas width="28" height="28" id="canvas"></canvas>
+        <div id="predictions">
+            Draw a number into the canvas and see what the model predicts
+        </div>
+    </div>
+</body>
+
+</html>
